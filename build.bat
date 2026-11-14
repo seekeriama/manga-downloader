@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-echo Dang build "Trinh tai truyen CBZ" (lan dau mat khoang 5-10 phut)...
+echo Dang build "CBZ Downloader" (lan dau mat khoang 5-10 phut)...
 cargo build --release
 if errorlevel 1 (
   echo.
@@ -8,7 +8,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-copy /Y target\release\truyen_dl.exe truyen_dl.exe >nul
+copy /Y target\release\cbz_downloader.exe cbz_downloader.exe >nul
 echo.
-echo XONG: da tao file truyen_dl.exe trong thu muc nay. Bam dup chuot vao file do de chay.
+echo XONG: da tao file cbz_downloader.exe trong thu muc nay. Bam dup chuot vao file do de chay.
 pause

@@ -16,13 +16,13 @@ use std::thread;
 use std::time::Duration;
 
 fn main() -> eframe::Result {
-    // Chế độ dòng lệnh (dùng để kiểm thử): truyen_dl --cli <url> <thư_mục> <each|merge> <KB> [edges] [chọn: 1-5]
+    // Chế độ dòng lệnh (dùng để kiểm thử): cbz_downloader --cli <url> <thư_mục> <each|merge> <KB> [edges] [chọn: 1-5]
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--cli") {
         cli(&args[2..]);
         return Ok(());
     }
-    // Bản mở bằng trình duyệt: truyen_dl --web  (thêm --no-open để không tự mở trình duyệt)
+    // Bản mở bằng trình duyệt: cbz_downloader --web  (thêm --no-open để không tự mở trình duyệt)
     if args.iter().any(|a| a == "--web") {
         web::run(!args.iter().any(|a| a == "--no-open"));
         return Ok(());
@@ -30,15 +30,15 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Trình tải truyện CBZ")
+            .with_title("CBZ Downloader")
             .with_inner_size([980.0, 760.0])
             .with_min_inner_size([720.0, 560.0]),
         ..Default::default()
     };
-    // truyen_dl <url>: mở giao diện với địa chỉ điền sẵn và tự kiểm tra
+    // cbz_downloader <url>: mở giao diện với địa chỉ điền sẵn và tự kiểm tra
     let start_url = args.get(1).filter(|a| !a.starts_with('-')).cloned();
     eframe::run_native(
-        "Trình tải truyện CBZ",
+        "CBZ Downloader",
         options,
         Box::new(|cc| {
             let mut app = App::new(cc);
@@ -270,7 +270,7 @@ impl App {
     fn ui_top(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.heading("Trình tải truyện CBZ");
+            ui.heading("CBZ Downloader");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("🌐 Mở bản trình duyệt").on_hover_text("Mở giao diện này trong trình duyệt web").clicked()
                     && let Ok(exe) = std::env::current_exe() {
@@ -481,7 +481,7 @@ impl eframe::App for App {
 // ------------------------------------------------------------ dòng lệnh (kiểm thử)
 
 fn cli(a: &[String]) {
-    let usage = "truyen_dl --cli <url> <thư_mục> <each|merge> <KB, 0=tắt> [edges] [từ-đến]";
+    let usage = "cbz_downloader --cli <url> <thư_mục> <each|merge> <KB, 0=tắt> [edges] [từ-đến]";
     let (Some(url), Some(out), Some(mode), Some(kb)) = (a.first(), a.get(1), a.get(2), a.get(3)) else {
         eprintln!("{usage}");
         std::process::exit(2);

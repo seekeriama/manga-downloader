@@ -593,6 +593,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbz_downloader"
+version = "1.0.0"
+dependencies = [
+ "eframe",
+ "regex",
+ "reqwest",
+ "rfd",
+ "scraper",
+ "serde_json",
+ "tiny_http",
+ "zip",
+]
+
+[[package]]
 name = "cc"
 version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4157,20 +4171,6 @@ dependencies = [
  "memchr",
  "nom",
  "petgraph",
-]
-
-[[package]]
-name = "truyen_dl"
-version = "1.0.0"
-dependencies = [
- "eframe",
- "regex",
- "reqwest",
- "rfd",
- "scraper",
- "serde_json",
- "tiny_http",
- "zip",
 ]
 
 [[package]]
