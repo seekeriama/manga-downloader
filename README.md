@@ -52,13 +52,27 @@ Thư mục `.github/workflows/build.yml` giúp GitHub tự build file `.exe` cho
 
 1. Mỗi lần có thay đổi được đẩy lên nhánh `main`, GitHub tự build.
 2. Mở tab **Actions** trên GitHub, đợi khoảng 5–10 phút. Bấm vào lần chạy mới nhất, phần **Artifacts** có file `truyen_dl-windows` để tải về.
-3. Muốn có bản phát hành (Release) cố định để chia sẻ link, đẩy một tag phiên bản:
-   ```powershell
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-   Sau khi build xong, tab **Releases** sẽ có file `truyen_dl-windows.zip`.
+3. Muốn có bản phát hành mới, xem mục **Phát hành phiên bản mới** bên dưới.
 
+## Phát hành phiên bản mới (Release)
+Làm hoàn toàn trên trang GitHub, không cần cài gì:
+
+1. (Nên làm) Sửa số phiên bản trong `Cargo.toml`: mở file trên GitHub → biểu tượng bút chì → đổi dòng
+   `version = "1.0.0"` thành số mới, ví dụ `1.1.0` → **Commit changes**.
+2. Vào trang **Releases** → **Draft a new release** (hoặc mở `https://github.com/seekeriama/manga-downloader/releases/new`).
+3. Bấm **Tag: Select tag** → gõ số phiên bản có chữ `v` ở đầu, ví dụ `v1.1.0` → **Create new tag** → **Create**.
+   Để **Target: main**.
+4. Điền **Release title** (vd. `v1.1.0 – Thêm trang X`) và phần mô tả thay đổi
+   (hoặc bấm **Generate release notes** để GitHub tự liệt kê).
+5. Bấm **Publish release**.
+6. Đợi 5–10 phút. Tab **Actions** sẽ có một lượt build cho tag `v1.1.0`; build xong, file
+   `truyen_dl-windows.zip` tự xuất hiện ở mục **Assets** của release đó.
+
+Quy ước số phiên bản: sửa lỗi nhỏ → tăng số cuối (`v1.0.1`); thêm tính năng → tăng số giữa (`v1.1.0`);
+thay đổi lớn → tăng số đầu (`v2.0.0`). Tag phải bắt đầu bằng `v` thì GitHub mới tự build và đính kèm file.
+
+Nếu build lỗi: vào tab **Actions** → bấm vào lượt chạy có dấu ✗ đỏ → xem bước bị lỗi. Sửa xong code,
+xoá release và tag cũ (trang release → **Delete**; tab **Tags** → xoá tag) rồi làm lại từ bước 2.
 
 ## Giấy phép
 MIT, xem file [LICENSE](LICENSE).
