@@ -1,0 +1,23 @@
+[package]
+name = "truyen_dl"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Tải truyện tranh từ web thành file CBZ"
+repository = "https://github.com/seekeriama/manga-downloader"
+
+[dependencies]
+eframe = "0.37.0"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "charset", "gzip", "http2", "native-tls"] }
+rfd = "0.18.0"
+scraper = "0.29.0"
+serde_json = "1.0.154"
+tiny_http = "0.12.0"
+zip = { version = "9.5.1", default-features = false }
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = "thin"

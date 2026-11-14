@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trình tải truyện CBZ</title>
+<style>
+  :root {
+    --bg: #f5f4f0; --panel: #ffffff; --line: #e2dfd7; --text: #1f1d1a; --muted: #6f6a60;
+    --accent: #c2410c; --accent-ink: #ffffff; --accent-soft: #fdeee4;
+    --ok: #15803d; --err: #b91c1c; --row-hover: #f7f5f0; --input: #fbfaf7;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161513; --panel: #1f1e1b; --line: #34322d; --text: #ece9e2; --muted: #9c978c;
+      --accent: #f97316; --accent-ink: #1a0f06; --accent-soft: #3a2415;
+      --ok: #4ade80; --err: #f87171; --row-hover: #26241f; --input: #181715;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  header h1 span { color: var(--accent); }
+  header .spacer { flex: 1; }
+  main { max-width: 1240px; margin: 0 auto; padding: 16px 20px 28px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  label { color: var(--text); }
+  .muted { color: var(--muted); font-size: 13px; }
+  input[type=text], input[type=number] {
+    font: inherit; color: var(--text); background: var(--input);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0;
+  }
+  input[type=number] { width: 84px; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; padding: 7px 12px;
+           border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--err); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  #urlForm input { flex: 1; min-width: 220px; }
+  #status { margin-top: 8px; min-height: 22px; font-size: 14px; white-space: pre-line; }
+  #status.ok { color: var(--ok); } #status.err { color: var(--err); }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; margin-top: 16px; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  #chapters { display: flex; flex-direction: column; min-height: 420px; }
+  .tools { display: grid; gap: 8px; margin-bottom: 10px; }
+  #list { flex: 1; overflow: auto; max-height: 62vh; border-top: 1px solid var(--line); margin: 0 -16px -14px; }
+  #list label { display: grid; grid-template-columns: 22px 44px 1fr auto; gap: 8px; align-items: center;
+                padding: 6px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  #list label:hover { background: var(--row-hover); }
+  #list .no { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  #list .grp { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; }
+  .empty { color: var(--muted); text-align: center; padding: 60px 10px; }
+  .opts { display: grid; gap: 14px; align-content: start; }
+  .field { display: grid; gap: 4px; }
+  .field input[type=text] { width: 100%; }
+  .choice { display: flex; gap: 8px; align-items: flex-start; padding: 2px 0; }
+  .choice input { margin-top: 4px; }
+  fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 4px; }
+  fieldset:disabled { opacity: .55; }
+  .sep { border: 0; border-top: 1px solid var(--line); margin: 2px 0; }
+  .preview { font-size: 13px; color: var(--muted); word-break: break-word; }
+  #startBtn { width: 100%; padding: 10px; font-size: 15px; }
+  #progressCard { margin-top: 16px; display: none; }
+  .bar { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  #progText { margin: 6px 0; font-size: 14px; }
+  #result { font-weight: 600; white-space: pre-line; margin: 8px 0; }
+  #log { font: 12.5px/1.5 Consolas, "Cascadia Mono", ui-monospace, monospace; max-height: 220px; overflow: auto;
+         background: var(--input); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 0; white-space: pre-wrap; }
+  #log .e { color: var(--err); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent);
+          border-radius: 50%; animation: s .8s linear infinite; vertical-align: -1px; margin-right: 6px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  #closed { display: none; text-align: center; padding: 80px 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trình tải truyện <span>CBZ</span></h1>
+  <div class="spacer"></div>
+  <button id="quitBtn" class="danger" title="Tắt máy chủ nội bộ của phần mềm">Tắt phần mềm</button>
+</header>
+
+<main id="app">
+  <section class="card">
+    <form id="urlForm" class="row" autocomplete="off">
+      <label for="url">Địa chỉ trang truyện</label>
+      <input id="url" type="text" placeholder="vd. https://truyenggvn.com/truyen-tranh/hanh-trinh-cua-uduchi-5804">
+      <button id="checkBtn" class="primary" type="submit">Kiểm tra</button>
+    </form>
+    <div id="status" class="muted">Hỗ trợ: các trang dạng truyenggvn.com và các trang Blogger (vd. pokemonspecial.com).</div>
+  </section>
+
+  <div class="layout">
+    <section id="chapters" class="card">
+      <h2 id="chapTitle">Danh sách chương</h2>
+      <div id="chapTools" class="tools" hidden>
+        <div class="row">
+          <input id="filter" type="text" class="grow" style="min-width:220px" placeholder="Lọc theo tên chương / nhóm">
+          <button data-sel="all" type="button">Chọn hết</button>
+          <button data-sel="none" type="button">Bỏ chọn hết</button>
+          <button data-sel="invert" type="button">Đảo</button>
+        </div>
+        <div class="row">
+          <span class="muted">Chọn theo số thứ tự: từ</span>
+          <input id="rFrom" type="number" min="1" value="1">
+          <span class="muted">đến</span>
+          <input id="rTo" type="number" min="1" value="1">
+          <button id="rangeBtn" type="button">Chỉ chọn khoảng này</button>
+        </div>
+      </div>
+      <div id="list"><div class="empty">Nhập địa chỉ trang truyện rồi bấm “Kiểm tra” để xem danh sách chương.</div></div>
+    </section>
+
+    <aside class="card opts" id="opts">
+      <h2>Tùy chọn lưu</h2>
+      <div class="field">
+        <label for="name">Tên truyện (tên file)</label>
+        <input id="name" type="text">
+      </div>
+      <div class="field">
+        <label for="outDir">Thư mục lưu</label>
+        <div class="row"><input id="outDir" type="text" class="grow"><button id="pickBtn" type="button">Chọn…</button></div>
+      </div>
+      <fieldset>
+        <div class="choice"><input type="radio" name="mode" id="modeEach" value="each" checked><label for="modeEach">Lưu từng chương thành file riêng</label></div>
+        <div class="choice"><input type="radio" name="mode" id="modeMerge" value="merge"><label for="modeMerge">Gộp tất cả chương đã chọn thành 1 file CBZ</label></div>
+        <div id="preview" class="preview"></div>
+        <div class="choice"><input type="checkbox" id="overwrite"><label for="overwrite">Ghi đè nếu file đã có</label></div>
+      </fieldset>
+
+      <hr class="sep">
+      <h2>Loại bỏ trang quảng cáo</h2>
+      <div class="choice"><input type="checkbox" id="adOn"><label for="adOn">Bật lọc quảng cáo</label></div>
+      <fieldset id="adBox" disabled>
+        <div class="row"><label for="adKb">Loại ảnh nhỏ hơn</label><input id="adKb" type="number" min="1" max="10000" step="1" value="100"><span>KB</span></div>
+        <div class="choice"><input type="radio" name="adScope" id="adEdges" checked><label for="adEdges">Chỉ xét ảnh đầu và ảnh cuối mỗi chương</label></div>
+        <div class="choice"><input type="radio" name="adScope" id="adAll"><label for="adAll">Xét mọi ảnh trong chương</label></div>
+        <div class="choice"><input type="checkbox" id="adSave"><label for="adSave">Lưu ảnh bị loại vào thư mục <code>_anh_bi_loai</code> để kiểm tra</label></div>
+        <div class="muted">Nếu mọi ảnh của một chương đều nhỏ hơn ngưỡng, chương đó được giữ nguyên.</div>
+      </fieldset>
+
+      <hr class="sep">
+      <div class="row"><label for="workers">Số ảnh tải cùng lúc</label><input id="workers" type="number" min="1" max="8" value="4"></div>
+      <button id="startBtn" class="primary" type="button" disabled>Tải</button>
+    </aside>
+  </div>
+
+  <section id="progressCard" class="card">
+    <div class="bar"><div id="bar"></div></div>
+    <div id="progText" class="muted"></div>
+    <div id="result"></div>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<div id="closed"><h2>Đã tắt phần mềm.</h2><p class="muted">Bạn có thể đóng tab này.</p></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let chapters = [], selected = [], visible = [], running = false, logLen = 0, pollTimer = null;
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("tdl_" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("tdl_" + k, JSON.stringify(v)); } catch {} },
+};
+
+async function api(path, body) {
+  const opt = body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+function setStatus(text, cls) {
+  const s = $("status");
+  s.className = cls || "muted";
+  s.innerHTML = "";
+  if (cls === "busy") { s.className = "muted"; const sp = document.createElement("span"); sp.className = "spin"; s.append(sp); }
+  s.append(document.createTextNode(text));
+}
+
+function safeName(s) {
+  s = s.replace(/[\\/:*?"<>|\x00-\x1f]/g, "-").split(/\s+/).filter(Boolean).join(" ").replace(/^[ .]+|[ .]+$/g, "");
+  return s || "truyen";
+}
+
+function updatePreview() {
+  const name = safeName($("name").value.trim() || "truyen");
+  $("preview").textContent = $("modeMerge").checked
+    ? `→ ${name}.cbz`
+    : `→ thư mục "${name}", chương đã có sẽ được bỏ qua`;
+  const n = selected.filter(Boolean).length;
+  const btn = $("startBtn");
+  if (running) { btn.textContent = "■ Dừng"; btn.disabled = false; btn.classList.remove("primary"); return; }
+  btn.classList.add("primary");
+  btn.textContent = $("modeMerge").checked ? `⬇ Tải ${n} chương và gộp thành 1 file` : `⬇ Tải ${n} chương`;
+  btn.disabled = n === 0;
+}
+
+function renderList() {
+  const f = $("filter").value.trim().toLowerCase();
+  visible = chapters.map((c, i) => i).filter(i => !f ||
+    chapters[i].title.toLowerCase().includes(f) || chapters[i].group.toLowerCase().includes(f));
+  const list = $("list");
+  list.innerHTML = "";
+  if (!chapters.length) return;
+  const frag = document.createDocumentFragment();
+  for (const i of visible) {
+    const c = chapters[i];
+    const row = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = selected[i]; cb.disabled = running;
+    cb.addEventListener("change", () => { selected[i] = cb.checked; updateCount(); });
+    const no = document.createElement("span"); no.className = "no"; no.textContent = i + 1;
+    const t = document.createElement("span"); t.textContent = c.title;
+    const g = document.createElement("span");
+    if (c.group) { g.className = "grp"; g.textContent = c.group; }
+    row.append(cb, no, t, g);
+    frag.append(row);
+  }
+  if (!visible.length) {
+    const e = document.createElement("div"); e.className = "empty"; e.textContent = "Không có chương nào khớp bộ lọc.";
+    frag.append(e);
+  }
+  list.append(frag);
+  updateCount();
+}
+
+function updateCount() {
+  const n = selected.filter(Boolean).length;
+  $("chapTitle").textContent = chapters.length ? `Danh sách chương (${n}/${chapters.length} đã chọn)` : "Danh sách chương";
+  updatePreview();
+}
+
+$("urlForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = $("url").value.trim();
+  if (!url || running) return;
+  $("checkBtn").disabled = true;
+  setStatus("Đang kiểm tra trang và đọc danh sách chương...", "busy");
+  try {
+    const r = await api("/api/inspect", { url });
+    if (r.error) {
+      chapters = []; selected = [];
+      $("chapTools").hidden = true;
+      $("list").innerHTML = '<div class="empty">Không có chương nào.</div>';
+      setStatus("✘ Không tải được. " + r.error, "err");
+    } else {
+      chapters = r.chapters; selected = chapters.map(() => true);
+      $("name").value = r.title;
+      $("rFrom").value = 1; $("rTo").value = chapters.length;
+      $("rFrom").max = $("rTo").max = chapters.length;
+      $("filter").value = "";
+      $("chapTools").hidden = false;
+      setStatus(`✔ Tải được: ${chapters.length} chương từ ${r.site}`, "ok");
+      store.set("url", url);
+    }
+  } catch (err) {
+    setStatus("✘ Không liên lạc được với phần mềm. Phần mềm đã bị tắt?", "err");
+  }
+  $("checkBtn").disabled = false;
+  renderList();
+});
+
+$("filter").addEventListener("input", renderList);
+document.querySelectorAll("[data-sel]").forEach(b => b.addEventListener("click", () => {
+  for (const i of visible) {
+    selected[i] = b.dataset.sel === "all" ? true : b.dataset.sel === "none" ? false : !selected[i];
+  }
+  renderList();
+}));
+$("rangeBtn").addEventListener("click", () => {
+  let a = +$("rFrom").value || 1, b = +$("rTo").value || chapters.length;
+  if (a > b) [a, b] = [b, a];
+  selected = chapters.map((_, i) => i + 1 >= a && i + 1 <= b);
+  renderList();
+});
+
+$("adOn").addEventListener("change", () => { $("adBox").disabled = !$("adOn").checked; saveOpts(); });
+["name", "modeEach", "modeMerge"].forEach(id => $(id).addEventListener("input", () => { updatePreview(); saveOpts(); }));
+["outDir", "overwrite", "adKb", "adEdges", "adAll", "adSave", "workers"].forEach(id => $(id).addEventListener("change", saveOpts));
+
+function saveOpts() {
+  store.set("opts", {
+    outDir: $("outDir").value, merge: $("modeMerge").checked, overwrite: $("overwrite").checked,
+    adOn: $("adOn").checked, adKb: +$("adKb").value, adEdges: $("adEdges").checked,
+    adSave: $("adSave").checked, workers: +$("workers").value,
+  });
+}
+
+$("pickBtn").addEventListener("click", async () => {
+  $("pickBtn").disabled = true;
+  try {
+    const r = await api("/api/pick-folder", { current: $("outDir").value });
+    if (r.path) { $("outDir").value = r.path; saveOpts(); }
+  } catch {}
+  $("pickBtn").disabled = false;
+});
+
+$("startBtn").addEventListener("click", async () => {
+  if (running) { await api("/api/cancel", {}); $("progText").textContent = "Đang dừng sau khi xong ảnh hiện tại..."; return; }
+  const indices = selected.map((s, i) => s ? i : -1).filter(i => i >= 0);
+  const r = await api("/api/start", {
+    indices, name: $("name").value, out_dir: $("outDir").value,
+    merge: $("modeMerge").checked, overwrite: $("overwrite").checked,
+    ad_enabled: $("adOn").checked, ad_kb: +$("adKb").value || 100,
+    ad_edges_only: $("adEdges").checked, ad_save: $("adSave").checked,
+    workers: +$("workers").value || 4,
+  });
+  if (r.error) { alert(r.error); return; }
+  logLen = 0; $("log").innerHTML = ""; $("result").textContent = "";
+  $("progressCard").style.display = "block";
+  setRunning(true);
+  poll();
+});
+
+function setRunning(v) {
+  running = v;
+  for (const id of ["url", "checkBtn", "name", "outDir", "pickBtn", "filter", "rangeBtn"]) $(id).disabled = v;
+  document.querySelectorAll("#opts fieldset, #opts input, [data-sel]").forEach(el => {
+    if (el.id !== "startBtn") el.disabled = v || (el.closest("#adBox") && !$("adOn").checked);
+  });
+  $("adBox").disabled = v || !$("adOn").checked;
+  renderList();
+}
+
+async function poll() {
+  clearTimeout(pollTimer);
+  let r;
+  try { r = await api(`/api/status?since=${logLen}`); }
+  catch { pollTimer = setTimeout(poll, 1500); return; }
+  const log = $("log");
+  for (const line of r.log) {
+    const d = document.createElement("div");
+    if (line.startsWith("[LỖI]")) d.className = "e";
+    d.textContent = line;
+    log.append(d);
+  }
+  if (r.log.length) log.scrollTop = log.scrollHeight;
+  logLen = r.log_len;
+  const pct = r.total ? Math.round(100 * r.done / r.total) : 0;
+  $("bar").style.width = (r.running ? pct : 100) + "%";
+  $("progText").textContent = r.running
+    ? (r.cancelling ? "Đang dừng sau khi xong ảnh hiện tại..." : `Đang tải: ${r.text}  ·  ${pct}%`)
+    : "";
+  if (r.result) $("result").textContent = r.result;
+  if (r.running) pollTimer = setTimeout(poll, 700);
+  else setRunning(false);
+}
+
+$("quitBtn").addEventListener("click", async () => {
+  if (running && !confirm("Đang tải. Tắt phần mềm sẽ dừng lượt tải này. Tiếp tục?")) return;
+  try { await api("/api/quit", {}); } catch {}
+  $("app").style.display = "none"; document.querySelector("header").style.display = "none";
+  $("closed").style.display = "block";
+});
+
+(async function init() {
+  const o = store.get("opts", null);
+  let defDir = "";
+  try { defDir = (await api("/api/defaults")).out_dir; } catch {}
+  $("outDir").value = (o && o.outDir) || defDir;
+  if (o) {
+    $("modeMerge").checked = o.merge; $("modeEach").checked = !o.merge;
+    $("overwrite").checked = o.overwrite; $("adOn").checked = o.adOn; $("adKb").value = o.adKb || 100;
+    $("adEdges").checked = o.adEdges; $("adAll").checked = !o.adEdges;
+    $("adSave").checked = o.adSave; $("workers").value = o.workers || 4;
+  }
+  $("adBox").disabled = !$("adOn").checked;
+  $("url").value = store.get("url", "");
+  updatePreview();
+  // nếu đang có lượt tải chạy (vd. mở lại tab), tiếp tục hiển thị tiến độ
+  try {
+    const s = await api("/api/status?since=0");
+    if (s.running) { $("progressCard").style.display = "block"; setRunning(true); poll(); }
+  } catch {}
+})();
+</script>
+</body>
+</html>

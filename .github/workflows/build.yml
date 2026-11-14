@@ -1,0 +1,54 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]          # đẩy tag v1.0.0, v1.1.0... -> tự tạo Release kèm file .exe
+  pull_request:
+  workflow_dispatch:      # cho phép bấm "Run workflow" bằng tay trên GitHub
+
+permissions:
+  contents: write         # cần để tạo Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache thư viện Rust (build lần sau nhanh hơn)
+        uses: Swatinem/rust-cache@v2
+
+      - name: Chạy kiểm thử
+        run: cargo test --release
+
+      - name: Build bản release
+        run: cargo build --release
+
+      - name: Đóng gói
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/truyen_dl.exe dist/
+          Copy-Item README.md dist/
+          Copy-Item Mo_ban_web.bat dist/
+          Compress-Archive -Path dist/* -DestinationPath truyen_dl-windows.zip -Force
+
+      - name: Lưu file build (tab Actions > Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: truyen_dl-windows
+          path: |
+            dist/truyen_dl.exe
+            dist/README.md
+            dist/Mo_ban_web.bat
+
+      - name: Tạo Release (chỉ khi đẩy tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: truyen_dl-windows.zip
+          generate_release_notes: true
