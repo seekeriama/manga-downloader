@@ -7,6 +7,8 @@
 //! Từ chối:
 //!   - cuutruyen.net (ảnh bị xáo trộn bằng DRM)
 
+use crate::i18n::t;
+use crate::tf;
 use regex::Regex;
 use reqwest::blocking::Client;
 use reqwest::{StatusCode, Url};
@@ -63,7 +65,7 @@ pub enum GetErr {
 impl From<GetErr> for String {
     fn from(e: GetErr) -> String {
         match e {
-            GetErr::NotFound => "không tồn tại (404)".into(),
+            GetErr::NotFound => t("không tồn tại (404)", "not found (404)").into(),
             GetErr::Other(s) => s,
         }
     }
@@ -84,10 +86,10 @@ pub fn get_bytes(http: &Client, url: &str, referer: Option<&str>) -> Result<Vec<
             Ok(resp) if resp.status() == StatusCode::NOT_FOUND => return Err(GetErr::NotFound),
             Ok(resp) if resp.status().is_success() => match resp.bytes() {
                 Ok(b) => return Ok(b.to_vec()),
-                Err(e) => last = format!("lỗi đọc dữ liệu: {e}"),
+                Err(e) => last = tf!("lỗi đọc dữ liệu: {e}", "read error: {e}"),
             },
             Ok(resp) => last = format!("HTTP {}", resp.status()),
-            Err(e) => last = format!("lỗi kết nối: {e}"),
+            Err(e) => last = tf!("lỗi kết nối: {e}", "connection error: {e}"),
         }
     }
     Err(GetErr::Other(format!("{last} ({url})")))
@@ -108,13 +110,23 @@ pub fn inspect(http: &Client, input: &str) -> Result<Series, String> {
     let input = input.trim();
     let url = Url::parse(input)
         .or_else(|_| Url::parse(&format!("https://{input}")))
-        .map_err(|_| "Địa chỉ không hợp lệ. Hãy dán đầy đủ, vd. https://truyenggvn.com/truyen-tranh/...".to_string())?;
+        .map_err(|_| {
+            t(
+                "Địa chỉ không hợp lệ. Hãy dán đầy đủ, vd. https://truyenggvn.com/truyen-tranh/...",
+                "Invalid address. Paste the full link, e.g. https://truyenggvn.com/truyen-tranh/...",
+            )
+            .to_string()
+        })?;
     let host = url.host_str().unwrap_or("").to_lowercase();
 
     if host.contains("cuutruyen") {
-        return Err("Không hỗ trợ cuutruyen.net: ảnh trên trang này bị xáo trộn bằng cơ chế bảo vệ bản quyền \
-                    (DRM), phần mềm không giải mã lớp bảo vệ này."
-            .into());
+        return Err(t(
+            "Không hỗ trợ cuutruyen.net: ảnh trên trang này bị xáo trộn bằng cơ chế bảo vệ bản quyền \
+             (DRM), phần mềm không giải mã lớp bảo vệ này.",
+            "cuutruyen.net is not supported: its images are scrambled with copy protection (DRM), \
+             which this software does not decode.",
+        )
+        .into());
     }
 
     if let Some(c) = TRUYENGGVN_RE.captures(url.path()) {
@@ -125,9 +137,11 @@ pub fn inspect(http: &Client, input: &str) -> Result<Series, String> {
 
     match inspect_blogger(http, &url) {
         Ok(s) => Ok(s),
-        Err(BloggerErr::NotBlogger) => Err(format!(
+        Err(BloggerErr::NotBlogger) => Err(tf!(
             "Chưa hỗ trợ trang {host}.\nHiện hỗ trợ: các trang dạng truyenggvn.com (/truyen-tranh/...) \
-             và các trang chạy trên Blogger (vd. pokemonspecial.com)."
+             và các trang chạy trên Blogger (vd. pokemonspecial.com).",
+            "{host} is not supported yet.\nSupported: sites like truyenggvn.com (/truyen-tranh/...) \
+             and sites running on Blogger (e.g. pokemonspecial.com)."
         )),
         Err(BloggerErr::Failed(e)) => Err(e),
     }
@@ -153,8 +167,11 @@ fn chap_key(slug: &str) -> (u64, u64) {
 
 fn inspect_truyenggvn(http: &Client, origin: &str, series_url: &str, sid: &str) -> Result<Series, String> {
     let html = get_text(http, series_url, Some(&format!("{origin}/"))).map_err(|e| match e {
-        GetErr::NotFound => "Trang truyện không tồn tại (404). Kiểm tra lại địa chỉ.".to_string(),
-        GetErr::Other(s) => format!("Không mở được trang truyện: {s}"),
+        GetErr::NotFound => {
+            t("Trang truyện không tồn tại (404). Kiểm tra lại địa chỉ.", "Comic page not found (404). Check the address.")
+                .to_string()
+        }
+        GetErr::Other(s) => tf!("Không mở được trang truyện: {s}", "Could not open the comic page: {s}"),
     })?;
     let doc = Html::parse_document(&html);
 
@@ -174,7 +191,11 @@ fn inspect_truyenggvn(http: &Client, origin: &str, series_url: &str, sid: &str) 
         }
     }
     if slugs.is_empty() {
-        return Err("Mở được trang nhưng không tìm thấy danh sách chương (có thể trang đã đổi cấu trúc).".into());
+        return Err(t(
+            "Mở được trang nhưng không tìm thấy danh sách chương (có thể trang đã đổi cấu trúc).",
+            "The page opened but no chapter list was found (the site may have changed its layout).",
+        )
+        .into());
     }
 
     let title = first_text(&doc, "h1")
@@ -281,7 +302,7 @@ fn feed_json(http: &Client, mut u: Url, start: usize, max: usize) -> Result<Valu
         .append_pair("start-index", &start.to_string())
         .append_pair("orderby", "published");
     let body = get_text(http, u.as_str(), None)?;
-    serde_json::from_str(&body).map_err(|_| GetErr::Other("feed không phải JSON".into()))
+    serde_json::from_str(&body).map_err(|_| GetErr::Other("feed: not JSON".into()))
 }
 
 fn feed_total(v: &Value) -> usize {
@@ -325,7 +346,7 @@ fn inspect_blogger(http: &Client, url: &Url) -> Result<Series, BloggerErr> {
         Ok(v) if v["feed"].is_object() => v,
         Ok(_) | Err(GetErr::NotFound) => return Err(BloggerErr::NotBlogger),
         Err(GetErr::Other(e)) if e.contains("JSON") => return Err(BloggerErr::NotBlogger),
-        Err(GetErr::Other(e)) => return Err(BloggerErr::Failed(format!("Không kết nối được: {e}"))),
+        Err(GetErr::Other(e)) => return Err(BloggerErr::Failed(tf!("Không kết nối được: {e}", "Could not connect: {e}"))),
     };
     let blog_title = head["feed"]["title"]["$t"].as_str().unwrap_or("Truyện").trim().to_string();
     let total = feed_total(&head);
@@ -339,7 +360,7 @@ fn inspect_blogger(http: &Client, url: &Url) -> Result<Series, BloggerErr> {
         segs.windows(3).find(|w| w[0] == "search" && w[1] == "label").map(|w| w[2].clone())
     };
 
-    let fail = |e: String| BloggerErr::Failed(format!("Lỗi khi đọc danh sách bài: {e}"));
+    let fail = |e: String| BloggerErr::Failed(tf!("Lỗi khi đọc danh sách bài: {e}", "Error reading the post list: {e}"));
     let mut seen: HashMap<String, Post> = HashMap::new();
     if let Some(l) = &label_in_url {
         for p in fetch_feed(http, &origin, Some(l)).map_err(fail)? {
@@ -363,7 +384,7 @@ fn inspect_blogger(http: &Client, url: &Url) -> Result<Series, BloggerErr> {
         }
     }
     if seen.is_empty() {
-        return Err(BloggerErr::Failed("Trang Blogger này không có bài viết nào.".into()));
+        return Err(BloggerErr::Failed(t("Trang Blogger này không có bài viết nào.", "This Blogger site has no posts.").into()));
     }
 
     let mut posts: Vec<Post> = seen.into_values().collect();
@@ -458,7 +479,7 @@ fn blogger_images(html: &str, page_url: &str) -> Vec<String> {
 /// Danh sách URL ảnh của một chương, theo thứ tự.
 pub fn chapter_images(http: &Client, series: &Series, ch: &Chapter) -> Result<Vec<String>, String> {
     let html = get_text(http, &ch.url, Some(&series.referer)).map_err(|e| match e {
-        GetErr::NotFound => "trang chương không tồn tại (404)".to_string(),
+        GetErr::NotFound => t("trang chương không tồn tại (404)", "chapter page not found (404)").to_string(),
         GetErr::Other(s) => s,
     })?;
     let imgs = match &series.kind {
@@ -473,7 +494,7 @@ pub fn chapter_images(http: &Client, series: &Series, ch: &Chapter) -> Result<Ve
         }
     };
     if imgs.is_empty() {
-        return Err("không tìm thấy ảnh trong trang chương".into());
+        return Err(t("không tìm thấy ảnh trong trang chương", "no images found on the chapter page").into());
     }
     Ok(imgs)
 }

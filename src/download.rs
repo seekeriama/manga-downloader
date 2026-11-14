@@ -1,6 +1,8 @@
 //! Tải chương, lọc ảnh quảng cáo, ghi CBZ (từng chương hoặc gộp 1 file).
 
+use crate::i18n::{chapter_display, t};
 use crate::sites::{chapter_images, get_bytes, Chapter, GetErr, Series};
+use crate::tf;
 use reqwest::blocking::Client;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -13,11 +15,16 @@ use std::time::Duration;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+/// Hai luật lọc quảng cáo, bật riêng hoặc cùng lúc. 1 KB = 1024 byte.
+/// Một ảnh bị loại nếu khớp BẤT KỲ luật nào đang bật.
 #[derive(Clone, Debug)]
 pub struct AdFilter {
-    pub enabled: bool,
-    /// Ảnh nhỏ hơn số KB này (1 KB = 1024 byte) bị coi là quảng cáo
+    /// Luật 1: loại ảnh NHỎ HƠN below_kb
+    pub below_enabled: bool,
     pub below_kb: f64,
+    /// Luật 2: loại ảnh LỚN HƠN above_kb
+    pub above_enabled: bool,
+    pub above_kb: f64,
     /// true: chỉ xét ảnh đầu và ảnh cuối của mỗi chương
     pub edges_only: bool,
     /// Lưu ảnh bị loại vào thư mục riêng để kiểm tra
@@ -107,37 +114,50 @@ fn fetch_pages(http: &Client, urls: &[String], referer: &str, workers: usize, ct
                 let r = match get_bytes(http, &urls[i], Some(referer)) {
                     Ok(d) => match image_ext(&d) {
                         Some(ext) => Ok(Page { data: d, ext }),
-                        None => Err(format!("trang {} không phải ảnh", i + 1)),
+                        None => Err(tf!("trang {} không phải ảnh", "page {} is not an image", i + 1)),
                     },
-                    Err(GetErr::NotFound) => Err(format!("trang {} không tồn tại (404)", i + 1)),
-                    Err(GetErr::Other(e)) => Err(format!("trang {}: {e}", i + 1)),
+                    Err(GetErr::NotFound) => Err(tf!("trang {} không tồn tại (404)", "page {} not found (404)", i + 1)),
+                    Err(GetErr::Other(e)) => Err(tf!("trang {}: {e}", "page {}: {e}", i + 1)),
                 };
                 *slots[i].lock().unwrap() = Some(r);
             });
         }
     });
     if ctx.cancelled() {
-        return Err("đã dừng".into());
+        return Err(t("đã dừng", "stopped").into());
     }
     slots
         .into_iter()
-        .map(|m| m.into_inner().unwrap().unwrap_or_else(|| Err("chưa tải".into())))
+        .map(|m| m.into_inner().unwrap().unwrap_or_else(|| Err(t("chưa tải", "not downloaded").into())))
         .collect()
 }
 
-/// Trả về (ảnh giữ lại, [(số thứ tự gốc, ảnh bị loại)]). Không bao giờ loại hết ảnh của một chương.
+impl AdFilter {
+    pub fn active(&self) -> bool {
+        (self.below_enabled && self.below_kb > 0.0) || (self.above_enabled && self.above_kb > 0.0)
+    }
+
+    /// Ảnh có dung lượng `size` byte có bị coi là quảng cáo không (chưa xét vị trí).
+    pub fn matches(&self, size: usize) -> bool {
+        let size = size as f64;
+        (self.below_enabled && self.below_kb > 0.0 && size < self.below_kb * 1024.0)
+            || (self.above_enabled && self.above_kb > 0.0 && size > self.above_kb * 1024.0)
+    }
+}
+
+/// Trả về (ảnh giữ lại, [(số thứ tự gốc, ảnh bị loại)], mọi_ảnh_đều_khớp).
+/// Không bao giờ loại hết ảnh của một chương.
 pub fn filter_ads(pages: Vec<Page>, ad: &AdFilter) -> (Vec<Page>, Vec<(usize, Page)>, bool) {
-    if !ad.enabled || ad.below_kb <= 0.0 || pages.is_empty() {
+    if !ad.active() || pages.is_empty() {
         return (pages, vec![], false);
     }
-    let limit = (ad.below_kb * 1024.0) as usize;
     let n = pages.len();
     let drop: Vec<bool> = pages
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let candidate = !ad.edges_only || i == 0 || i == n - 1;
-            candidate && n > 1 && p.data.len() < limit
+            candidate && n > 1 && ad.matches(p.data.len())
         })
         .collect();
     if drop.iter().all(|d| *d) {
@@ -178,8 +198,8 @@ fn opts() -> SimpleFileOptions {
 type Zip = ZipWriter<BufWriter<File>>;
 
 fn zip_put(z: &mut Zip, name: &str, data: &[u8]) -> Result<(), String> {
-    z.start_file(name, opts()).map_err(|e| format!("lỗi ghi zip: {e}"))?;
-    z.write_all(data).map_err(|e| format!("lỗi ghi file: {e}"))
+    z.start_file(name, opts()).map_err(|e| tf!("lỗi ghi zip: {e}", "zip write error: {e}"))?;
+    z.write_all(data).map_err(|e| tf!("lỗi ghi file: {e}", "file write error: {e}"))
 }
 
 fn part_path(p: &Path) -> PathBuf {
@@ -188,7 +208,7 @@ fn part_path(p: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Tên hiển thị của chương trong tên file / bookmark
+/// Tên chương trong bookmark của file CBZ (giữ nguyên, không đổi theo ngôn ngữ giao diện)
 fn chapter_label(ch: &Chapter) -> String {
     ch.title.clone()
 }
@@ -197,14 +217,20 @@ fn chapter_label(ch: &Chapter) -> String {
 fn load_chapter(http: &Client, job: &Job, ch: &Chapter, ctx: &Ctx) -> Result<(Vec<Page>, String), String> {
     let urls = chapter_images(http, &job.series, ch)?;
     let pages = fetch_pages(http, &urls, &job.series.referer, job.workers, ctx)?;
-    let (kept, removed, all_small) = filter_ads(pages, &job.ad);
-    let mut note = format!("{} trang", kept.len());
-    if all_small {
-        note += " (mọi ảnh đều nhỏ hơn ngưỡng nên giữ nguyên, hãy kiểm tra lại ngưỡng KB)";
+    let (kept, removed, all_matched) = filter_ads(pages, &job.ad);
+    let mut note = tf!("{} trang", "{} pages", kept.len());
+    if all_matched {
+        note += t(
+            " (mọi ảnh đều khớp luật lọc nên giữ nguyên, hãy kiểm tra lại ngưỡng KB)",
+            " (every image matched the ad rules so none were removed; check the KB limits)",
+        );
     }
     if !removed.is_empty() {
-        let list: Vec<String> = removed.iter().map(|(i, p)| format!("trang {i} ({})", kb(p.data.len()))).collect();
-        note += &format!(", đã loại {}", list.join(", "));
+        let list: Vec<String> = removed
+            .iter()
+            .map(|(i, p)| tf!("trang {i} ({})", "page {i} ({})", kb(p.data.len())))
+            .collect();
+        note += &tf!(", đã loại {}", ", removed {}", list.join(", "));
         if job.ad.save_removed {
             let dir = job.out_dir.join("_anh_bi_loai");
             if fs::create_dir_all(&dir).is_ok() {
@@ -228,9 +254,9 @@ pub fn run(job: Job, tx: Sender<Msg>, cancel: Arc<AtomicBool>) {
 fn run_each(http: &Client, job: &Job, ctx: &Ctx) -> String {
     let dir = job.out_dir.join(safe_name(&job.name));
     if let Err(e) = fs::create_dir_all(&dir) {
-        return format!("Không tạo được thư mục {}: {e}", dir.display());
+        return tf!("Không tạo được thư mục {}: {e}", "Could not create folder {}: {e}", dir.display());
     }
-    ctx.log(format!("Lưu từng chương vào: {}", dir.display()));
+    ctx.log(tf!("Lưu từng chương vào: {}", "Saving each chapter to: {}", dir.display()));
     let total = job.chapters.len();
     let (mut ok, mut skipped, mut failed) = (0, 0, Vec::new());
     for (i, ch) in job.chapters.iter().enumerate() {
@@ -238,19 +264,20 @@ fn run_each(http: &Client, job: &Job, ctx: &Ctx) -> String {
             break;
         }
         let label = chapter_label(ch);
-        ctx.progress(i, total, format!("{label} ({}/{total})", i + 1));
+        let shown = chapter_display(ch);
+        ctx.progress(i, total, format!("{shown} ({}/{total})", i + 1));
         let file_title =
             if ch.number.is_empty() { label.clone() } else { format!("{} - Chương {}", job.name, ch.number) };
         let cbz = dir.join(format!("{}.cbz", safe_name(&file_title)));
         if cbz.exists() && !job.overwrite {
-            ctx.log(format!("[đã có] {label}"));
+            ctx.log(tf!("[đã có] {shown}", "[exists] {shown}"));
             skipped += 1;
             continue;
         }
         let res = load_chapter(http, job, ch, ctx).and_then(|(pages, note)| {
             let tmp = part_path(&cbz);
             let write = || -> Result<(), String> {
-                let f = File::create(&tmp).map_err(|e| format!("không tạo được file: {e}"))?;
+                let f = File::create(&tmp).map_err(|e| tf!("không tạo được file: {e}", "could not create file: {e}"))?;
                 let mut z = ZipWriter::new(BufWriter::new(f));
                 for (pi, p) in pages.iter().enumerate() {
                     zip_put(&mut z, &format!("{:04}{}", pi + 1, p.ext), &p.data)?;
@@ -258,7 +285,10 @@ fn run_each(http: &Client, job: &Job, ctx: &Ctx) -> String {
                 let number = (!ch.number.is_empty()).then(|| ch.number.trim_start_matches('0').to_string());
                 let info = comic_info(&job.name, &file_title, number.as_deref(), pages.len(), &[]);
                 zip_put(&mut z, "ComicInfo.xml", info.as_bytes())?;
-                z.finish().map_err(|e| format!("lỗi đóng zip: {e}"))?.flush().map_err(|e| e.to_string())?;
+                z.finish()
+                    .map_err(|e| tf!("lỗi đóng zip: {e}", "zip finish error: {e}"))?
+                    .flush()
+                    .map_err(|e| e.to_string())?;
                 Ok(())
             };
             match write().and_then(|_| fs::rename(&tmp, &cbz).map_err(|e| e.to_string())) {
@@ -272,43 +302,50 @@ fn run_each(http: &Client, job: &Job, ctx: &Ctx) -> String {
         match res {
             Ok(note) => {
                 ok += 1;
-                ctx.log(format!("[xong] {label}: {note}"));
+                ctx.log(tf!("[xong] {shown}: {note}", "[done] {shown}: {note}"));
             }
             Err(e) => {
                 if ctx.cancelled() {
                     break;
                 }
-                ctx.log(format!("[LỖI] {label}: {e}"));
-                failed.push(label);
+                ctx.log(tf!("[LỖI] {shown}: {e}", "[ERROR] {shown}: {e}"));
+                failed.push(shown);
             }
         }
         thread::sleep(Duration::from_millis(300));
     }
     ctx.progress(total, total, "");
-    let mut s = format!("Đã tải {ok} chương, bỏ qua {skipped} chương đã có");
+    let mut s = tf!(
+        "Đã tải {ok} chương, bỏ qua {skipped} chương đã có",
+        "Downloaded {ok} chapters, skipped {skipped} existing"
+    );
     if !failed.is_empty() {
-        s += &format!(", lỗi {}: {}", failed.len(), failed.join(", "));
+        s += &tf!(", lỗi {}: {}", ", failed {}: {}", failed.len(), failed.join(", "));
     }
     if ctx.cancelled() {
-        s = format!("Đã dừng. {s}");
+        s = tf!("Đã dừng. {s}", "Stopped. {s}");
     }
-    s + &format!(".\nThư mục: {}", dir.display())
+    s + &tf!(".\nThư mục: {}", ".\nFolder: {}", dir.display())
 }
 
 fn run_merge(http: &Client, job: &Job, ctx: &Ctx) -> String {
     if let Err(e) = fs::create_dir_all(&job.out_dir) {
-        return format!("Không tạo được thư mục {}: {e}", job.out_dir.display());
+        return tf!("Không tạo được thư mục {}: {e}", "Could not create folder {}: {e}", job.out_dir.display());
     }
     let out = job.out_dir.join(format!("{}.cbz", safe_name(&job.name)));
     if out.exists() && !job.overwrite {
-        return format!("Đã có file {}.\nĐổi tên truyện, hoặc bật \"Ghi đè nếu đã có\".", out.display());
+        return tf!(
+            "Đã có file {}.\nĐổi tên truyện, hoặc bật \"Ghi đè nếu file đã có\".",
+            "{} already exists.\nChange the comic name, or turn on \"Overwrite existing files\".",
+            out.display()
+        );
     }
     let tmp = part_path(&out);
     let f = match File::create(&tmp) {
         Ok(f) => f,
-        Err(e) => return format!("Không tạo được file {}: {e}", tmp.display()),
+        Err(e) => return tf!("Không tạo được file {}: {e}", "Could not create file {}: {e}", tmp.display()),
     };
-    ctx.log(format!("Gộp tất cả vào: {}", out.display()));
+    ctx.log(tf!("Gộp tất cả vào: {}", "Merging everything into: {}", out.display()));
     let mut z = ZipWriter::new(BufWriter::new(f));
     let total = job.chapters.len();
     let (mut pages_total, mut ci, mut bookmarks, mut failed) = (0usize, 0usize, Vec::new(), Vec::new());
@@ -316,10 +353,11 @@ fn run_merge(http: &Client, job: &Job, ctx: &Ctx) -> String {
     let result = (|| -> Result<(), String> {
         for (i, ch) in job.chapters.iter().enumerate() {
             if ctx.cancelled() {
-                return Err("đã dừng".into());
+                return Err(t("đã dừng", "stopped").into());
             }
             let label = chapter_label(ch);
-            ctx.progress(i, total, format!("{label} ({}/{total})", i + 1));
+            let shown = chapter_display(ch);
+            ctx.progress(i, total, format!("{shown} ({}/{total})", i + 1));
             match load_chapter(http, job, ch, ctx) {
                 Ok((pages, note)) => {
                     ci += 1;
@@ -328,20 +366,20 @@ fn run_merge(http: &Client, job: &Job, ctx: &Ctx) -> String {
                         zip_put(&mut z, &format!("{ci:04}_{:04}{}", pi + 1, p.ext), &p.data)?;
                         pages_total += 1;
                     }
-                    ctx.log(format!("[xong] {label}: {note}"));
+                    ctx.log(tf!("[xong] {shown}: {note}", "[done] {shown}: {note}"));
                 }
                 Err(e) => {
                     if ctx.cancelled() {
-                        return Err("đã dừng".into());
+                        return Err(t("đã dừng", "stopped").into());
                     }
-                    ctx.log(format!("[LỖI] {label}: {e} (bỏ qua chương này)"));
-                    failed.push(label);
+                    ctx.log(tf!("[LỖI] {shown}: {e} (bỏ qua chương này)", "[ERROR] {shown}: {e} (chapter skipped)"));
+                    failed.push(shown);
                 }
             }
             thread::sleep(Duration::from_millis(300));
         }
         if ci == 0 {
-            return Err("không tải được chương nào".into());
+            return Err(t("không tải được chương nào", "no chapter could be downloaded").into());
         }
         let info = comic_info(&job.name, &job.name, None, pages_total, &bookmarks);
         zip_put(&mut z, "ComicInfo.xml", info.as_bytes())?;
@@ -349,11 +387,11 @@ fn run_merge(http: &Client, job: &Job, ctx: &Ctx) -> String {
     })();
 
     let finished = result.and_then(|_| {
-        let mut w = z.finish().map_err(|e| format!("lỗi đóng zip: {e}"))?;
+        let mut w = z.finish().map_err(|e| tf!("lỗi đóng zip: {e}", "zip finish error: {e}"))?;
         w.flush().map_err(|e| e.to_string())?;
         drop(w);
         if out.exists() {
-            fs::remove_file(&out).map_err(|e| format!("không ghi đè được file cũ: {e}"))?;
+            fs::remove_file(&out).map_err(|e| tf!("không ghi đè được file cũ: {e}", "could not overwrite old file: {e}"))?;
         }
         fs::rename(&tmp, &out).map_err(|e| e.to_string())
     });
@@ -361,19 +399,27 @@ fn run_merge(http: &Client, job: &Job, ctx: &Ctx) -> String {
     match finished {
         Ok(()) => {
             let size = fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-            let mut s = format!(
+            let mut s = tf!(
                 "Xong: {} ({ci} chương, {pages_total} trang, {:.1} MB)",
+                "Done: {} ({ci} chapters, {pages_total} pages, {:.1} MB)",
                 out.display(),
                 size as f64 / 1048576.0
             );
             if !failed.is_empty() {
-                s += &format!("\nCác chương bị lỗi (không có trong file): {}", failed.join(", "));
+                s += &tf!(
+                    "\nCác chương bị lỗi (không có trong file): {}",
+                    "\nFailed chapters (not in the file): {}",
+                    failed.join(", ")
+                );
             }
             s
         }
         Err(e) => {
             let _ = fs::remove_file(&tmp);
-            format!("Không tạo được file gộp: {e}. Không có file nào bị thay đổi.")
+            tf!(
+                "Không tạo được file gộp: {e}. Không có file nào bị thay đổi.",
+                "Could not create the merged file: {e}. No files were changed."
+            )
         }
     }
 }
@@ -388,13 +434,38 @@ mod tests {
 
     #[test]
     fn ads() {
-        let f = |edges| AdFilter { enabled: true, below_kb: 100.0, edges_only: edges, save_removed: false };
+        let f = |edges| AdFilter {
+            below_enabled: true,
+            below_kb: 100.0,
+            above_enabled: false,
+            above_kb: 0.0,
+            edges_only: edges,
+            save_removed: false,
+        };
         let (k, r, _) = filter_ads(vec![pg(50), pg(300), pg(20), pg(300), pg(80)], &f(false));
         assert_eq!((k.len(), r.iter().map(|x| x.0).collect::<Vec<_>>()), (2, vec![1, 3, 5]));
         let (k, r, _) = filter_ads(vec![pg(50), pg(300), pg(20), pg(300), pg(80)], &f(true));
         assert_eq!((k.len(), r.iter().map(|x| x.0).collect::<Vec<_>>()), (3, vec![1, 5]));
         let (k, r, all) = filter_ads(vec![pg(5), pg(6)], &f(false));
         assert_eq!((k.len(), r.len(), all), (2, 0, true));
+
+        // luật "lớn hơn" riêng, và hai luật cùng lúc
+        let big = AdFilter { below_enabled: false, above_enabled: true, above_kb: 1000.0, ..f(false) };
+        let (k, r, _) = filter_ads(vec![pg(50), pg(300), pg(1500), pg(300), pg(2000)], &big);
+        assert_eq!((k.len(), r.iter().map(|x| x.0).collect::<Vec<_>>()), (3, vec![3, 5]));
+        let both = AdFilter { below_enabled: true, ..big.clone() };
+        let (k, r, _) = filter_ads(vec![pg(50), pg(300), pg(1500), pg(300), pg(2000)], &both);
+        assert_eq!((k.len(), r.iter().map(|x| x.0).collect::<Vec<_>>()), (2, vec![1, 3, 5]));
+        let both_edges = AdFilter { edges_only: true, ..both.clone() };
+        let (k, r, _) = filter_ads(vec![pg(2000), pg(300), pg(1500), pg(300), pg(50)], &both_edges);
+        assert_eq!((k.len(), r.iter().map(|x| x.0).collect::<Vec<_>>()), (3, vec![1, 5]));
+        // ngưỡng = đúng biên thì không loại (nhỏ hơn / lớn hơn là so sánh chặt)
+        let (_, r, _) = filter_ads(vec![pg(100), pg(1000)], &both);
+        assert!(r.is_empty());
+        // tắt cả hai luật -> không loại gì
+        let off = AdFilter { below_enabled: false, above_enabled: false, ..both };
+        let (k, _, _) = filter_ads(vec![pg(1), pg(5000)], &off);
+        assert_eq!(k.len(), 2);
     }
 
     #[test]

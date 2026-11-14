@@ -2,6 +2,8 @@
 //! và mở giao diện web trong trình duyệt mặc định. Dùng lại toàn bộ phần tải/lọc/ghi CBZ.
 
 use crate::download::{self, AdFilter, Job, Msg};
+use crate::i18n::{self, chapter_display, t};
+use crate::tf;
 use crate::sites::{self, Series};
 use serde_json::{json, Value};
 use std::io::Read;
@@ -59,7 +61,13 @@ pub fn run(open_browser: bool) {
         .expect("không mở được cổng mạng nội bộ");
     let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(0);
     let url = format!("http://127.0.0.1:{port}/");
-    println!("Giao diện web: {url}  (đóng bằng nút \"Tắt phần mềm\" trên trang, hoặc Ctrl+C)");
+    println!(
+        "{}",
+        tf!(
+            "Giao diện web: {url}  (đóng bằng nút \"Tắt phần mềm\" trên trang, hoặc Ctrl+C)",
+            "Web interface: {url}  (close with the \"Quit\" button on the page, or Ctrl+C)"
+        )
+    );
     if open_browser {
         open_url(&url);
     }
@@ -81,7 +89,7 @@ fn open_url(url: &str) {
     #[cfg(all(unix, not(target_os = "macos")))]
     let r = std::process::Command::new("xdg-open").arg(url).spawn();
     if r.is_err() {
-        println!("Hãy tự mở trình duyệt và vào {url}");
+        println!("{}", tf!("Hãy tự mở trình duyệt và vào {url}", "Open your browser and go to {url}"));
     }
 }
 
@@ -130,7 +138,7 @@ fn handle(mut req: Request, state: Shared, allowed_hosts: &[String]) {
             .iter()
             .any(|h| h.field.equiv("Content-Type") && h.value.as_str().starts_with("application/json"));
         if !is_json || req.as_reader().take(1 << 20).read_to_string(&mut body).is_err() {
-            send_json(req, 400, json!({"error": "yêu cầu không hợp lệ"}));
+            send_json(req, 400, json!({"error": t("yêu cầu không hợp lệ", "invalid request")}));
             return;
         }
     }
@@ -138,21 +146,41 @@ fn handle(mut req: Request, state: Shared, allowed_hosts: &[String]) {
 
     match (method, path) {
         (Method::Get, "/api/defaults") => {
-            send_json(req, 200, json!({"out_dir": crate::default_out_dir().display().to_string()}))
+            // đọc lại file cài đặt: ngôn ngữ có thể vừa được đổi ở bản desktop
+            i18n::load();
+            send_json(
+                req,
+                200,
+                json!({"out_dir": crate::default_out_dir().display().to_string(), "lang": i18n::code()}),
+            )
+        }
+        (Method::Post, "/api/lang") => {
+            i18n::set_en(input["lang"].as_str() == Some("en"));
+            send_json(req, 200, json!({"lang": i18n::code()}))
+        }
+        (Method::Get, "/api/series") => {
+            // cho phép trang tải lại (vd. sau khi đổi ngôn ngữ) mà không mất danh sách chương
+            let st = state.lock().unwrap();
+            let v = match &st.series {
+                Some(s) => series_json(s),
+                None => Value::Null,
+            };
+            drop(st);
+            send_json(req, 200, v)
         }
         (Method::Post, "/api/inspect") => {
             let url = input["url"].as_str().unwrap_or("").to_string();
             if state.lock().unwrap().job.running {
-                return send_json(req, 409, json!({"error": "Đang tải, hãy đợi xong hoặc bấm Dừng."}));
+                return send_json(
+                    req,
+                    409,
+                    json!({"error": t("Đang tải, hãy đợi xong hoặc bấm Dừng.", "A download is running; wait or press Stop.")}),
+                );
             }
             let http = sites::client();
             match sites::inspect(&http, &url) {
                 Ok(s) => {
-                    let v = json!({
-                        "title": s.title,
-                        "site": s.site,
-                        "chapters": s.chapters.iter().map(|c| json!({"title": c.title, "group": c.group})).collect::<Vec<_>>(),
-                    });
+                    let v = series_json(&s);
                     state.lock().unwrap().series = Some(s);
                     send_json(req, 200, v)
                 }
@@ -206,27 +234,35 @@ fn handle(mut req: Request, state: Shared, allowed_hosts: &[String]) {
             thread::sleep(Duration::from_millis(300));
             std::process::exit(0);
         }
-        _ => send_json(req, 404, json!({"error": "không có"})),
+        _ => send_json(req, 404, json!({"error": "not found"})),
     }
+}
+
+fn series_json(s: &Series) -> Value {
+    json!({
+        "title": s.title,
+        "site": s.site,
+        "chapters": s.chapters.iter().map(|c| json!({"title": chapter_display(c), "group": c.group})).collect::<Vec<_>>(),
+    })
 }
 
 fn start_job(state: &Shared, v: &Value) -> Result<(), String> {
     let mut st = state.lock().unwrap();
     if st.job.running {
-        return Err("Đang có một lượt tải chạy.".into());
+        return Err(t("Đang có một lượt tải chạy.", "A download is already running.").into());
     }
-    let series = st.series.clone().ok_or("Hãy bấm Kiểm tra trước.")?;
+    let series = st.series.clone().ok_or(t("Hãy bấm Kiểm tra trước.", "Press Check first."))?;
     let idx: Vec<usize> = v["indices"]
         .as_array()
         .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect())
         .unwrap_or_default();
     let chapters: Vec<_> = idx.iter().filter_map(|&i| series.chapters.get(i).cloned()).collect();
     if chapters.is_empty() {
-        return Err("Chưa chọn chương nào.".into());
+        return Err(t("Chưa chọn chương nào.", "No chapters selected.").into());
     }
     let out_dir = v["out_dir"].as_str().unwrap_or("").trim().to_string();
     if out_dir.is_empty() {
-        return Err("Hãy nhập thư mục lưu.".into());
+        return Err(t("Hãy nhập thư mục lưu.", "Enter a save folder.").into());
     }
     let name = v["name"].as_str().unwrap_or("").trim();
     let job = Job {
@@ -237,8 +273,10 @@ fn start_job(state: &Shared, v: &Value) -> Result<(), String> {
         merge: v["merge"].as_bool().unwrap_or(false),
         overwrite: v["overwrite"].as_bool().unwrap_or(false),
         ad: AdFilter {
-            enabled: v["ad_enabled"].as_bool().unwrap_or(false),
-            below_kb: v["ad_kb"].as_f64().unwrap_or(100.0),
+            below_enabled: v["ad_below_on"].as_bool().unwrap_or(false),
+            below_kb: v["ad_below_kb"].as_f64().unwrap_or(100.0),
+            above_enabled: v["ad_above_on"].as_bool().unwrap_or(false),
+            above_kb: v["ad_above_kb"].as_f64().unwrap_or(2000.0),
             edges_only: v["ad_edges_only"].as_bool().unwrap_or(true),
             save_removed: v["ad_save"].as_bool().unwrap_or(false),
         },

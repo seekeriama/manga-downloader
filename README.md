@@ -1,5 +1,5 @@
 # CBZ Downloader
-Download manga/comic and convert it into cbz file for your offline reading.
+Download manga/comic and convert it into cbz file for your offline reading. The app has a Vietnamese/English language switch.
 
 Trình tải truyện tranh thành file CBZ, viết bằng Rust, có giao diện desktop và giao diện trình duyệt web.
 
@@ -13,7 +13,15 @@ Phần mềm có giao diện để tải truyện tranh từ web về thành fil
 3. Chọn cách lưu:
    - **Lưu từng chương** thành file riêng (trong thư mục mang tên truyện; chương đã có sẽ được bỏ qua, nên có thể tải tiếp phần còn thiếu).
    - **Gộp tất cả** chương đã chọn thành **1 file CBZ**, có bookmark ở đầu mỗi chương.
-4. **Loại bỏ trang quảng cáo**: bỏ ảnh nhỏ hơn N KB (1 KB = 1024 byte), chọn xét *chỉ ảnh đầu và cuối mỗi chương* hoặc *mọi ảnh*. Có thể lưu ảnh bị loại vào thư mục `_anh_bi_loai` để kiểm tra lại.
+4. **Loại bỏ trang quảng cáo** (1 KB = 1024 byte), có hai luật bật riêng hoặc cùng lúc:
+   - *Loại ảnh nhỏ hơn* N KB (vd. trang quảng cáo nhẹ ở đầu/cuối chương).
+   - *Loại ảnh lớn hơn* M KB (vd. ảnh quảng cáo nặng hơn trang truyện).
+
+   Ảnh khớp bất kỳ luật nào đang bật sẽ bị loại. Chọn xét *chỉ ảnh đầu và cuối mỗi chương* hoặc *mọi ảnh*.
+   Có thể lưu ảnh bị loại vào thư mục `_anh_bi_loai` để kiểm tra lại.
+5. **Tiếng Việt / English**: bấm công tắc **VI | EN** ở góc trên. Bản trình duyệt sẽ tải lại trang và giữ nguyên
+   danh sách chương đang chọn. Lựa chọn được ghi nhớ cho lần mở sau (dùng chung cho bản desktop và bản trình duyệt).
+   Tên file và bookmark trong CBZ luôn giữ dạng `Chương 0001` để thư viện truyện nhất quán.
 
 ## Bản mở bằng trình duyệt web
 Cùng file `cbz_downloader.exe` có thể chạy với giao diện trong trình duyệt (Chrome, Edge...):
